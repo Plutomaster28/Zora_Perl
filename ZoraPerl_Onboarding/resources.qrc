@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file>music/The_Day_of_Night.mp3</file>
+    </qresource>
+</RCC>
