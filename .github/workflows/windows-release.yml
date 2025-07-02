@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'  # Triggers on version tags like v1.0.0, v1.2.3
+    branches:
+      - main  # Add this line
   workflow_dispatch:  # Allows manual triggering
     inputs:
       version:
