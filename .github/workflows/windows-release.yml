@@ -41,32 +41,97 @@ jobs:
         ninja
     
     - name: Prepare release package
-      shell: msys2 {0}
+      shell: pwsh
       run: |
         # Create release directory
-        mkdir -p zora-perl-release
+        New-Item -ItemType Directory -Path "zora-perl-release" -Force
         
-        # Copy the entire home directory structure (excluding .git and build folders)
-        rsync -av --exclude='.git' --exclude='*/build' --exclude='*.zip' . zora-perl-release/
+        # Copy the entire project structure (excluding .git and build folders)
+        $sourceItems = Get-ChildItem -Path "." -Exclude @(".git", "*.zip", "zora-perl-release")
+        foreach ($item in $sourceItems) {
+          if ($item.Name -like "*build*" -and $item.PSIsContainer) {
+            # Skip build directories but copy their parent structure
+            $destPath = "zora-perl-release\$($item.Name)"
+            New-Item -ItemType Directory -Path $destPath -Force
+            
+            # Copy non-build contents
+            $subItems = Get-ChildItem -Path $item.FullName -Exclude "build"
+            foreach ($subItem in $subItems) {
+              Copy-Item -Path $subItem.FullName -Destination $destPath -Recurse -Force
+            }
+          }
+          else {
+            Copy-Item -Path $item.FullName -Destination "zora-perl-release\" -Recurse -Force
+          }
+        }
         
-        # Move the built executable to the onboarding directory for convenience
-        if [ -f "ZoraPerl_Onboarding/build/ZoraPerl_Onboarding.exe" ]; then
-          cp ZoraPerl_Onboarding/build/ZoraPerl_Onboarding.exe zora-perl-release/ZoraPerl_Onboarding/
-          echo "✓ Executable copied to onboarding directory"
-        else
-          echo "✗ Executable not found!"
+        Write-Host "✓ Project structure copied"
+    
+    - name: Copy executable and dependencies
+      shell: pwsh
+      run: |
+        # Copy the built executable to the onboarding directory
+        $exePath = "ZoraPerl_Onboarding\build\ZoraPerl_Onboarding.exe"
+        $destPath = "zora-perl-release\ZoraPerl_Onboarding\ZoraPerl_Onboarding.exe"
+        
+        if (Test-Path $exePath) {
+          Copy-Item -Path $exePath -Destination $destPath -Force
+          Write-Host "✓ Executable copied to onboarding directory"
+        }
+        else {
+          Write-Host "✗ Executable not found at: $exePath"
+          Get-ChildItem -Path "ZoraPerl_Onboarding\build\" -Recurse
           exit 1
-        fi
+        }
+    
+    - name: Copy Qt dependencies
+      shell: msys2 {0}
+      run: |
+        # Get Qt dependencies
+        echo "Copying Qt runtime libraries..."
         
-        # Copy Qt runtime libraries needed for the executable
-        ldd ZoraPerl_Onboarding/build/ZoraPerl_Onboarding.exe | grep "ucrt64" | awk '{print $3}' | while read lib; do
-          if [ -f "$lib" ]; then
-            cp "$lib" zora-perl-release/ZoraPerl_Onboarding/
+        # Find Qt libraries in MSYS2
+        QT_BIN_PATH="/ucrt64/bin"
+        DEST_PATH="zora-perl-release/ZoraPerl_Onboarding"
+        
+        # Essential Qt libraries
+        QT_LIBS=(
+          "Qt6Core.dll"
+          "Qt6Gui.dll"
+          "Qt6Widgets.dll"
+          "Qt6Multimedia.dll"
+          "Qt6Network.dll"
+        )
+        
+        # Copy Qt libraries
+        for lib in "${QT_LIBS[@]}"; do
+          if [ -f "$QT_BIN_PATH/$lib" ]; then
+            cp "$QT_BIN_PATH/$lib" "$DEST_PATH/"
+            echo "✓ Copied $lib"
+          else
+            echo "⚠ $lib not found"
           fi
         done
         
+        # Copy essential system libraries
+        SYSTEM_LIBS=(
+          "libwinpthread-1.dll"
+          "libgcc_s_seh-1.dll"
+          "libstdc++-6.dll"
+        )
+        
+        for lib in "${SYSTEM_LIBS[@]}"; do
+          if [ -f "$QT_BIN_PATH/$lib" ]; then
+            cp "$QT_BIN_PATH/$lib" "$DEST_PATH/"
+            echo "✓ Copied $lib"
+          fi
+        done
+    
+    - name: Create launch script and documentation
+      shell: pwsh
+      run: |
         # Create a simple run script
-        cat > zora-perl-release/ZoraPerl_Onboarding/run.bat << 'EOF'
+        $runScript = @'
         @echo off
         echo Starting ZoraPerl Onboarding...
         ZoraPerl_Onboarding.exe
@@ -75,10 +140,12 @@ jobs:
             echo An error occurred. Press any key to exit.
             pause >nul
         )
-        EOF
+        '@
+        
+        $runScript | Out-File -FilePath "zora-perl-release\ZoraPerl_Onboarding\run.bat" -Encoding ASCII
         
         # Create README for the release
-        cat > zora-perl-release/RELEASE_README.md << 'EOF'
+        $readme = @'
         # ZoraPerl Release Package
         
         ## Quick Start
@@ -98,26 +165,32 @@ jobs:
         ## Directory Structure
         The setup wizard will automatically create the ZoraPerl system directories
         in the same location as this package when first run.
-        EOF
+        '@
+        
+        $readme | Out-File -FilePath "zora-perl-release\RELEASE_README.md" -Encoding UTF8
+        
+        Write-Host "✓ Launch script and documentation created"
     
     - name: Create ZIP package
-      shell: pwsh
-      run: |
-        Compress-Archive -Path "zora-perl-release\*" -DestinationPath "ZoraPerl-Windows-${{ github.ref_name || github.event.inputs.version }}.zip" -Force
-        
-        # Get file size for release notes
-        $zipSize = (Get-Item "ZoraPerl-Windows-${{ github.ref_name || github.event.inputs.version }}.zip").Length
-        $zipSizeMB = [math]::Round($zipSize / 1MB, 2)
-        echo "ZIP_SIZE_MB=$zipSizeMB" | Out-File -FilePath $env:GITHUB_ENV -Append
-    
-    - name: Get release version
       shell: pwsh
       run: |
         $version = "${{ github.ref_name }}" -replace '^refs/tags/', ''
         if ("${{ github.event_name }}" -eq "workflow_dispatch") {
           $version = "${{ github.event.inputs.version }}"
         }
+        
+        $zipName = "ZoraPerl-Windows-$version.zip"
+        Compress-Archive -Path "zora-perl-release\*" -DestinationPath $zipName -Force
+        
+        # Get file size for release notes
+        $zipSize = (Get-Item $zipName).Length
+        $zipSizeMB = [math]::Round($zipSize / 1MB, 2)
+        
         echo "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+        echo "ZIP_SIZE_MB=$zipSizeMB" | Out-File -FilePath $env:GITHUB_ENV -Append
+        echo "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+        
+        Write-Host "✓ Created $zipName ($zipSizeMB MB)"
     
     - name: Create Release
       uses: softprops/action-gh-release@v1
@@ -125,33 +198,33 @@ jobs:
         tag_name: ${{ env.RELEASE_VERSION }}
         name: "ZoraPerl ${{ env.RELEASE_VERSION }} - Windows Release"
         files: |
-          ZoraPerl-Windows-${{ env.RELEASE_VERSION }}.zip
+          ${{ env.ZIP_NAME }}
         body: |
           ## ZoraPerl ${{ env.RELEASE_VERSION }} - Windows Release
           
-          ### What's New
+          ### 📦 What's New
           - Complete ZoraPerl system package
           - Setup wizard with smart directory detection
           - Automated configuration system
           
-          ### Package Contents
+          ### 📋 Package Contents
           - **Setup Wizard**: Complete onboarding experience
           - **System Structure**: Pre-configured ZoraPerl directories
           - **Configuration**: Sample configs and templates
           - **Runtime**: All required dependencies included
           
-          ### Quick Installation
-          1. Download `ZoraPerl-Windows-${{ env.RELEASE_VERSION }}.zip` (${{ env.ZIP_SIZE_MB }} MB)
+          ### 🚀 Quick Installation
+          1. Download `${{ env.ZIP_NAME }}` (${{ env.ZIP_SIZE_MB }} MB)
           2. Extract to your preferred location
           3. Navigate to `ZoraPerl_Onboarding` folder
           4. Run `ZoraPerl_Onboarding.exe` or `run.bat`
           
-          ### System Requirements
+          ### 💻 System Requirements
           - Windows 10/11 (64-bit)
           - ~50MB free disk space
           - No additional software required
           
-          ### Features
+          ### 🔧 Features
           - **Smart Setup**: Automatic directory structure creation
           - **Configuration Management**: JSON-based settings
           - **User-Friendly**: Guided setup wizard
