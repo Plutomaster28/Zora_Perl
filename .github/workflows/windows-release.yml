@@ -1,0 +1,175 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0, v1.2.3
+  workflow_dispatch:  # Allows manual triggering
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          mingw-w64-ucrt-x86_64-toolchain
+          mingw-w64-ucrt-x86_64-cmake
+          mingw-w64-ucrt-x86_64-ninja
+          mingw-w64-ucrt-x86_64-qt6-base
+          mingw-w64-ucrt-x86_64-qt6-multimedia
+    
+    - name: Build project
+      shell: msys2 {0}
+      run: |
+        cd ZoraPerl_Onboarding
+        mkdir -p build
+        cd build
+        cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+        ninja
+    
+    - name: Prepare release package
+      shell: msys2 {0}
+      run: |
+        # Create release directory
+        mkdir -p zora-perl-release
+        
+        # Copy the entire home directory structure (excluding .git and build folders)
+        rsync -av --exclude='.git' --exclude='*/build' --exclude='*.zip' . zora-perl-release/
+        
+        # Move the built executable to the onboarding directory for convenience
+        if [ -f "ZoraPerl_Onboarding/build/ZoraPerl_Onboarding.exe" ]; then
+          cp ZoraPerl_Onboarding/build/ZoraPerl_Onboarding.exe zora-perl-release/ZoraPerl_Onboarding/
+          echo "✓ Executable copied to onboarding directory"
+        else
+          echo "✗ Executable not found!"
+          exit 1
+        fi
+        
+        # Copy Qt runtime libraries needed for the executable
+        ldd ZoraPerl_Onboarding/build/ZoraPerl_Onboarding.exe | grep "ucrt64" | awk '{print $3}' | while read lib; do
+          if [ -f "$lib" ]; then
+            cp "$lib" zora-perl-release/ZoraPerl_Onboarding/
+          fi
+        done
+        
+        # Create a simple run script
+        cat > zora-perl-release/ZoraPerl_Onboarding/run.bat << 'EOF'
+        @echo off
+        echo Starting ZoraPerl Onboarding...
+        ZoraPerl_Onboarding.exe
+        if %errorlevel% neq 0 (
+            echo.
+            echo An error occurred. Press any key to exit.
+            pause >nul
+        )
+        EOF
+        
+        # Create README for the release
+        cat > zora-perl-release/RELEASE_README.md << 'EOF'
+        # ZoraPerl Release Package
+        
+        ## Quick Start
+        1. Extract this zip file to your desired location
+        2. Navigate to the `ZoraPerl_Onboarding` folder
+        3. Double-click `run.bat` or `ZoraPerl_Onboarding.exe` to start
+        
+        ## What's Included
+        - **ZoraPerl_Onboarding/**: Setup wizard application
+        - **ZoraPerl/**: Main system directory structure
+        - **etc/**: Configuration files and samples
+        
+        ## Requirements
+        - Windows 10/11 (64-bit)
+        - No additional installation required - all dependencies included
+        
+        ## Directory Structure
+        The setup wizard will automatically create the ZoraPerl system directories
+        in the same location as this package when first run.
+        EOF
+    
+    - name: Create ZIP package
+      shell: pwsh
+      run: |
+        Compress-Archive -Path "zora-perl-release\*" -DestinationPath "ZoraPerl-Windows-${{ github.ref_name || github.event.inputs.version }}.zip" -Force
+        
+        # Get file size for release notes
+        $zipSize = (Get-Item "ZoraPerl-Windows-${{ github.ref_name || github.event.inputs.version }}.zip").Length
+        $zipSizeMB = [math]::Round($zipSize / 1MB, 2)
+        echo "ZIP_SIZE_MB=$zipSizeMB" | Out-File -FilePath $env:GITHUB_ENV -Append
+    
+    - name: Get release version
+      shell: pwsh
+      run: |
+        $version = "${{ github.ref_name }}" -replace '^refs/tags/', ''
+        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          $version = "${{ github.event.inputs.version }}"
+        }
+        echo "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.RELEASE_VERSION }}
+        name: "ZoraPerl ${{ env.RELEASE_VERSION }} - Windows Release"
+        files: |
+          ZoraPerl-Windows-${{ env.RELEASE_VERSION }}.zip
+        body: |
+          ## ZoraPerl ${{ env.RELEASE_VERSION }} - Windows Release
+          
+          ### What's New
+          - Complete ZoraPerl system package
+          - Setup wizard with smart directory detection
+          - Automated configuration system
+          
+          ### Package Contents
+          - **Setup Wizard**: Complete onboarding experience
+          - **System Structure**: Pre-configured ZoraPerl directories
+          - **Configuration**: Sample configs and templates
+          - **Runtime**: All required dependencies included
+          
+          ### Quick Installation
+          1. Download `ZoraPerl-Windows-${{ env.RELEASE_VERSION }}.zip` (${{ env.ZIP_SIZE_MB }} MB)
+          2. Extract to your preferred location
+          3. Navigate to `ZoraPerl_Onboarding` folder
+          4. Run `ZoraPerl_Onboarding.exe` or `run.bat`
+          
+          ### System Requirements
+          - Windows 10/11 (64-bit)
+          - ~50MB free disk space
+          - No additional software required
+          
+          ### Features
+          - **Smart Setup**: Automatic directory structure creation
+          - **Configuration Management**: JSON-based settings
+          - **User-Friendly**: Guided setup wizard
+          - **Portable**: No installation required
+          
+          ---
+          
+          Built with Qt6 and love ❤️
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: zora-perl-windows-build
+        path: |
+          ZoraPerl_Onboarding/build/ZoraPerl_Onboarding.exe
+          zora-perl-release/
+        retention-days: 30
