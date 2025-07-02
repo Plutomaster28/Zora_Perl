@@ -3,9 +3,7 @@ name: Windows Release
 on:
   push:
     tags:
-      - 'v*'  # Triggers on version tags like v1.0.0, v1.2.3
-    branches:
-      - main  # Add this line
+      - 'v*'  # Only create releases for version tags
   workflow_dispatch:  # Allows manual triggering
     inputs:
       version:
@@ -173,22 +171,33 @@ jobs:
         
         Write-Host "✓ Launch script and documentation created"
     
-    - name: Create ZIP package
+    - name: Get version for release
       shell: pwsh
       run: |
-        $version = "${{ github.ref_name }}" -replace '^refs/tags/', ''
         if ("${{ github.event_name }}" -eq "workflow_dispatch") {
           $version = "${{ github.event.inputs.version }}"
         }
+        elseif ("${{ github.ref_type }}" -eq "tag") {
+          $version = "${{ github.ref_name }}"
+        }
+        else {
+          Write-Host "No valid version found - this should only run on tags or manual dispatch"
+          exit 1
+        }
         
-        $zipName = "ZoraPerl-Windows-$version.zip"
+        echo "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+        Write-Host "✓ Release version: $version"
+    
+    - name: Create ZIP package
+      shell: pwsh
+      run: |
+        $zipName = "ZoraPerl-Windows-${{ env.RELEASE_VERSION }}.zip"
         Compress-Archive -Path "zora-perl-release\*" -DestinationPath $zipName -Force
         
         # Get file size for release notes
         $zipSize = (Get-Item $zipName).Length
         $zipSizeMB = [math]::Round($zipSize / 1MB, 2)
         
-        echo "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
         echo "ZIP_SIZE_MB=$zipSizeMB" | Out-File -FilePath $env:GITHUB_ENV -Append
         echo "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
         

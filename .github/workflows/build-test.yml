@@ -1,0 +1,42 @@
+name: Build Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          mingw-w64-ucrt-x86_64-toolchain
+          mingw-w64-ucrt-x86_64-cmake
+          mingw-w64-ucrt-x86_64-ninja
+          mingw-w64-ucrt-x86_64-qt6-base
+          mingw-w64-ucrt-x86_64-qt6-multimedia
+    
+    - name: Build project
+      shell: msys2 {0}
+      run: |
+        cd ZoraPerl_Onboarding
+        mkdir -p build
+        cd build
+        cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+        ninja
+    
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: zora-perl-test-build
+        path: ZoraPerl_Onboarding/build/ZoraPerl_Onboarding.exe
+        retention-days: 7
