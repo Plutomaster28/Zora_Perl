@@ -13,6 +13,15 @@ int main(int argc, char *argv[]) {
     player->setAudioOutput(audioOutput);
     player->setSource(QUrl("qrc:/music/The_Day_of_Night.mp3"));
     audioOutput->setVolume(1.0); // Set volume (0.0 - 1.0)
+    
+    // Enable seamless looping
+    QObject::connect(player, &QMediaPlayer::mediaStatusChanged, [player](QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::EndOfMedia) {
+            player->setPosition(0);  // Reset to beginning
+            player->play();          // Start playing again
+        }
+    });
+    
     player->play();
 
     SoftLanding window;
