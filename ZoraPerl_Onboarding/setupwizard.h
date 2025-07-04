@@ -13,6 +13,8 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QString>
+#include <QButtonGroup>
+#include <QLabel>
 
 class SetupWizard : public QWidget {
     Q_OBJECT
@@ -30,16 +32,17 @@ private:
     QPushButton *nextButton;
     QPushButton *backButton;
     int currentIndex;
+    QList<QLabel*> stepLabels;
 
     // UI components to store references for data collection
-    QComboBox *languageCombo;
-    QComboBox *regionCombo;
-    QComboBox *keyboardCombo;
+    QButtonGroup *languageButtonGroup;
+    QButtonGroup *regionButtonGroup;
+    QButtonGroup *keyboardButtonGroup;
     QRadioButton *lightModeRadio;
     QRadioButton *darkModeRadio;
     QLineEdit *usernameEdit;
     QLineEdit *passwordEdit;
-    QListWidget *networksList;
+    QButtonGroup *networkButtonGroup;
     QCheckBox *devToolsCheckbox;
     QCheckBox *webBrowserCheckbox;
     QCheckBox *musicPlayerCheckbox;
@@ -60,6 +63,7 @@ private:
     
     void collectUserData();
     void saveConfigToFile();
+    void updateStepIndicator();
 };
 
 #endif // SETUPWIZARD_H
