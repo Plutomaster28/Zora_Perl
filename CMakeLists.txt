@@ -4,6 +4,10 @@ project(ZoraPerl)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_PREFIX_PATH "C:/msys64/ucrt64") # Adjust to your Qt install
 
+# Find Python
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+
+# Remove Svg from the components list
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 add_executable(ZoraPerl
@@ -18,7 +22,11 @@ add_executable(ZoraPerl
 
 target_link_libraries(ZoraPerl
     Qt6::Widgets
+    Python3::Python
 )
+
+# Include Python headers
+target_include_directories(ZoraPerl PRIVATE ${Python3_INCLUDE_DIRS})
 
 # Set the executable to be placed in the ZoraPerl directory
 set_target_properties(ZoraPerl PROPERTIES
